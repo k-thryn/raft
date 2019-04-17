@@ -51,7 +51,7 @@ def msg_leader(msg):
             sock.send(json.dumps(fwd))
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
     elif msg['type'] == 'heartbeat':
-        print(str(my_id) + ' leader receiving heartbeat')
+        #print(str(my_id) + ' leader receiving heartbeat')
         leader_seen = time.time()
         LEADER = msg['src']
         STATE = FOLLOWER # they threw a coup :(
@@ -60,7 +60,7 @@ def msg_leader(msg):
             TERM = msg['term'] # they are democratically throwing a coup :(
             res = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM} 
             STATE = FOLLOWER # and we're going along with it :(
-            print('sending ' + msg['type'])
+           # print('sending ' + msg['type'])
     if res: sock.send(json.dumps(res))
 
 def msg_candidate(msg):
@@ -69,7 +69,7 @@ def msg_candidate(msg):
     # store the message until the election is over
         BUFFER.append(msg)    
     elif msg['type'] == 'heartbeat':
-        print(str(my_id) + ' candidate received heartbeat')
+        #print(str(my_id) + ' candidate received heartbeat')
         leader_seen = time.time()
         LEADER = msg['src']
         STATE = FOLLOWER
@@ -81,14 +81,14 @@ def msg_candidate(msg):
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
             STATE = FOLLOWER
             send_buffer()
-            print(str(my_id) + ' voting in term ' + str(TERM))
+            #print(str(my_id) + ' voting in term ' + str(TERM))
             sock.send(json.dumps(msg))
     elif msg['type'] == 'vote':
         if (TERM == msg['term']):
             leader_seen = time.time()
             VOTES = VOTES + 1
             if (VOTES > (len(replica_ids) + 1) / 2):
-                print(str(my_id) + ' is now leader')
+                #print(str(my_id) + ' is now leader')
                 STATE = LEADER_STATE
                 LEADER = my_id # declare victory
                 send_buffer()
@@ -113,7 +113,7 @@ def msg_follower(msg):
             leader_seen = time.time()
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
-            print(str(my_id) + ' voting in term ' + str(TERM))
+            #print(str(my_id) + ' voting in term ' + str(TERM))
             sock.send(json.dumps(msg))
     elif msg['type'] == 'append_entries':
         VALUES[msg['key']] = msg['value']
@@ -147,7 +147,7 @@ while True:
         STATE = CANDIDATE
         TERM = TERM + 1
         VOTES = 1
-        print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
+        #print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
         leader_seen = time.time()
         for id in replica_ids:
             msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM}
