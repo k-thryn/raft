@@ -30,7 +30,7 @@ last = 0
 leader_seen = 0
 
 def send_buffer():
-	global BUFFER
+    global BUFFER
     while (len(BUFFER) > 0):
         msg = BUFFER.pop()
         if STATE == LEADER_STATE:
@@ -46,12 +46,12 @@ def msg_leader(msg):
     if msg['type'] == 'get':
         msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
-	    VALUES[msg['key']] = msg['value']
-	    msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
+        VALUES[msg['key']] = msg['value']
+        msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
     elif msg['type'] == 'heartbeat':
         print(str(my_id) + ' leader receiving heartbeat')
         leader_seen = time.time()
-	    LEADER = msg['src']
+        LEADER = msg['src']
         STATE = FOLLOWER # they threw a coup :(
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
@@ -93,9 +93,9 @@ def msg_candidate(msg):
                 VOTES = 0
                  
 def msg_follower(msg):
-	global leader_seen, LEADER, TERM
+    global leader_seen, LEADER, TERM
     if msg['type'] in ['get', 'put']:
-    	msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'redirect', 'MID': msg['MID']}
+        msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'redirect', 'MID': msg['MID']}
         sock.send(json.dumps(msg))
     elif msg['type'] == 'heartbeat':
         print(str(my_id) + ' follower receiving heartbeat')
@@ -110,31 +110,31 @@ def msg_follower(msg):
             sock.send(json.dumps(msg))
 
 while True:
-	ready = select.select([sock], [], [], 0.1)[0]
+    ready = select.select([sock], [], [], 0.1)[0]
 
-	if sock in ready:
-		msg_raw = sock.recv(32768)
+    if sock in ready:
+        msg_raw = sock.recv(32768)
 
-		if len(msg_raw) != 0:
-			msg = json.loads(msg_raw)
-			if (msg['dst'] == my_id):
-				if STATE == LEADER_STATE:
-					msg_leader(msg)
+        if len(msg_raw) != 0:
+            msg = json.loads(msg_raw)
+            if (msg['dst'] == my_id):
+                if STATE == LEADER_STATE:
+                    msg_leader(msg)
                 elif STATE == CANDIDATE:
                     msg_candidate(msg)        
                 else:
                     msg_follower(msg)
-					
-	clock = time.time()
-	if STATE == LEADER_STATE and clock-last > .12:
-		# Send a no-op message to a random peer every two seconds, just for fun
-		# You definitely want to remove this from your implementation
+                    
+    clock = time.time()
+    if STATE == LEADER_STATE and clock-last > .12:
+        # Send a no-op message to a random peer every two seconds, just for fun
+        # You definitely want to remove this from your implementation
         for id in replica_ids:
-		    msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'heartbeat'}
-		    sock.send(json.dumps(msg))
+            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'heartbeat'}
+            sock.send(json.dumps(msg))
             # print(str(my_id) + ' heartbeat')
-		    #print '%s sending a NOOP to %s' % (msg['src'], msg['dst'])
-		last = clock
+            #print '%s sending a NOOP to %s' % (msg['src'], msg['dst'])
+        last = clock
     elif STATE != LEADER_STATE and clock-leader_seen > ELECTION_TIMEOUT:
         STATE = CANDIDATE
         TERM = TERM + 1
