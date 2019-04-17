@@ -33,21 +33,23 @@ def send_buffer():
     global BUFFER
     while (len(BUFFER) > 0):
         msg = BUFFER.pop()
-        if STATE == LEADER_STATE:
-            msg_leader(msg)
-        elif STATE == CANDIDATE: 
-            msg_candidate(msg)
-        else:
-            msg_follower(msg)
+        msg['leader'] = LEADER
+        msg['dst'] = LEADER
+        sock.send(json.dumps(msg))
 
 # Handler functions
 def msg_leader(msg):
     global VALUES, leader_seen, LEADER, STATE, FOLLOWER, TERM
+    res = None
     if msg['type'] == 'get':
-        msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
+        res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
         VALUES[msg['key']] = msg['value']
-        msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
+        # update replicas, append_entries. TODO: this will be where we wait for commits
+        for id in replica_ids:
+            fwd = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'append_entries', 'key': msg['key'], 'value': msg['value']}
+            sock.send(json.dumps(fwd))
+        res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
     elif msg['type'] == 'heartbeat':
         print(str(my_id) + ' leader receiving heartbeat')
         leader_seen = time.time()
@@ -56,10 +58,10 @@ def msg_leader(msg):
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             TERM = msg['term'] # they are democratically throwing a coup :(
-            msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM} 
+            res = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM} 
             STATE = FOLLOWER # and we're going along with it :(
             print('sending ' + msg['type'])
-    if msg: sock.send(json.dumps(msg))
+    if res: sock.send(json.dumps(res))
 
 def msg_candidate(msg):
     global BUFFER, leader_seen, LEADER, STATE, FOLLOWER, TERM, VOTES, LEADER_STATE
@@ -93,14 +95,19 @@ def msg_candidate(msg):
                 VOTES = 0
                  
 def msg_follower(msg):
-    global leader_seen, LEADER, TERM
-    if msg['type'] in ['get', 'put']:
+    global leader_seen, LEADER, TERM, BUFFER, VALUES
+    if msg['type'] in ['get', 'put']: 
         msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'redirect', 'MID': msg['MID']}
-        sock.send(json.dumps(msg))
+        if (LEADER == 'FFFF'):
+            BUFFER.append(msg)
+        else:
+            sock.send(json.dumps(msg))
     elif msg['type'] == 'heartbeat':
-        print(str(my_id) + ' follower receiving heartbeat')
+        #print(str(my_id) + ' follower receiving heartbeat')
         leader_seen = time.time()
-        LEADER = msg['src']
+        if (LEADER != msg['src']):
+            LEADER = msg['src']
+            send_buffer()
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             leader_seen = time.time()
@@ -108,9 +115,11 @@ def msg_follower(msg):
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
             print(str(my_id) + ' voting in term ' + str(TERM))
             sock.send(json.dumps(msg))
+    elif msg['type'] == 'append_entries':
+        VALUES[msg['key']] = msg['value']
 
 while True:
-    ready = select.select([sock], [], [], 0.1)[0]
+    ready = select.select([sock], [], [], 0.02)[0]
 
     if sock in ready:
         msg_raw = sock.recv(32768)
@@ -132,15 +141,14 @@ while True:
         for id in replica_ids:
             msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'heartbeat'}
             sock.send(json.dumps(msg))
-            # print(str(my_id) + ' heartbeat')
             #print '%s sending a NOOP to %s' % (msg['src'], msg['dst'])
         last = clock
-    elif STATE != LEADER_STATE and clock-leader_seen > ELECTION_TIMEOUT:
+    elif (STATE != LEADER_STATE) and (clock-leader_seen > ELECTION_TIMEOUT):
         STATE = CANDIDATE
         TERM = TERM + 1
         VOTES = 1
+        print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
         leader_seen = time.time()
-        print(str(my_id) + ' request_vote')
         for id in replica_ids:
             msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM}
             sock.send(json.dumps(msg))
