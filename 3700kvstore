@@ -13,7 +13,9 @@ ELECTION_TIMEOUT = random.uniform(.15, .3)
 STATE = FOLLOWER
 TERM = 0
 VOTES = 0
+VOTED_FOR = None
 BUFFER = []
+LOG = []
 NEW_ENTRIES = []
 
 # Your ID number
@@ -22,13 +24,29 @@ my_id = sys.argv[1]
 # The ID numbers of all the other replicas
 replica_ids = sys.argv[2:]
 
+# For leaders: dict<replica_id, index>
+next_index = {} # Keeps track of the next log index to send to replicas
+match_index = {} # Keeps track of the highest log entry known to be replicated for each replica
+
+# All servers: volatile state. initialized to 0, increases monotonically
+commit_index = 0 # highest log entry known to be committed. 
+last_applied = 0 # highest log entry *applied*.
+
+# Timestamps
+last = 0
+leader_seen = 0
+
 # Connect to the network. All messages to/from other replicas and clients will
 # occur over this socket
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
 sock.connect(my_id)
 
-last = 0
-leader_seen = 0
+# Call after each election to re-initialize
+def initialize_indices():
+    global replica_ids, next_index, match_index
+    for id in replica_ids:
+        next_index[id] = len(LOG) # initialize to leader last log index + 1
+        match_index[id] = 0 # initialized to 0, increases monotonically
 
 def send_buffer():
     global BUFFER
@@ -48,15 +66,17 @@ def msg_leader(msg):
         VALUES[msg['key']] = msg['value']
         # update replicas, append_entries. TODO: this will be where we wait for commits
         for id in replica_ids:
-            fwd = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'append_entries', 'key': msg['key'], 'value': msg['value']}
+            fwd = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'key': msg['key'], 'value': msg['value']}
             NEW_ENTRIES.append(fwd)
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
     elif msg['type'] == 'append_entries':
         #print(str(my_id) + ' leader receiving heartbeat')
-        leader_seen = time.time()
-        LEADER = msg['src']
-        STATE = FOLLOWER # they threw a coup :(
-        # TODO implement commit stage here if msg['key']
+        if (TERM < msg['term']): 
+            LEADER = msg['src']
+            TERM = msg['term']
+            leader_seen = time.time()
+            STATE = FOLLOWER # they threw a coup :(
+            # TODO implement commit stage here if msg['key']
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             TERM = msg['term'] # they are democratically throwing a coup :(
@@ -82,6 +102,7 @@ def msg_candidate(msg):
             leader_seen = time.time()
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
+            VOTED_FOR = msg['src']
             STATE = FOLLOWER
             send_buffer()
             #print(str(my_id) + ' voting in term ' + str(TERM))
@@ -96,6 +117,7 @@ def msg_candidate(msg):
                 LEADER = my_id # declare victory
                 send_buffer()
                 VOTES = 0
+                initialize_indices() # configure leader indices
                  
 def msg_follower(msg):
     global leader_seen, LEADER, TERM, BUFFER, VALUES
@@ -111,13 +133,16 @@ def msg_follower(msg):
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
             #print(str(my_id) + ' voting in term ' + str(TERM))
+            VOTED_FOR = msg['src']
             sock.send(json.dumps(msg))
     elif msg['type'] == 'append_entries':
         leader_seen = time.time()
-        if (LEADER != msg['src']):
+        if (TERM < msg['term'] or (TERM == msg['term'] and LEADER != msg['leader'])):
             LEADER = msg['src']
+            TERM = msg['term']
             send_buffer()
         if (msg['key']):
+            # TODO: change to log/commits
             VALUES[msg['key']] = msg['value']
 
 while True:
@@ -139,14 +164,13 @@ while True:
     clock = time.time()
     if STATE == LEADER_STATE and clock-last > .12:
         # Heartbeats
-        heartbeat = True
+        heartbeat = False if (len(NEW_ENTRIES) > 0) else True 
         while len(NEW_ENTRIES) > 0:
-            heartbeat = False
             msg = NEW_ENTRIES.pop()
             sock.send(json.dumps(msg))
         if heartbeat:
             for id in replica_ids:
-                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'append_entries', 'key': None, 'value': None}
+                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'key': None, 'value': None}
                 sock.send(json.dumps(msg))
         last = clock
     elif (STATE != LEADER_STATE) and (clock-leader_seen > ELECTION_TIMEOUT):
