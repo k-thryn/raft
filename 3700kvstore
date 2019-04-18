@@ -2,7 +2,7 @@
 
 import sys, socket, select, time, json, random
 
-# non-leader states
+# states
 CANDIDATE = 'candidate'
 FOLLOWER = 'follower'
 LEADER_STATE = 'leader'
@@ -15,7 +15,7 @@ TERM = 0
 VOTES = 0
 VOTED_FOR = None
 BUFFER = []
-LOG = []
+LOG = [{}]
 NEW_ENTRIES = []
 
 # Your ID number
@@ -29,7 +29,7 @@ next_index = {} # Keeps track of the next log index to send to replicas
 match_index = {} # Keeps track of the highest log entry known to be replicated for each replica
 
 # All servers: volatile state. initialized to 0, increases monotonically
-commit_index = 0 # highest log entry known to be committed. 
+commit_index = 0 # highest log entry known to be committed.
 last_applied = 0 # highest log entry *applied*.
 
 # Timestamps
@@ -45,7 +45,7 @@ sock.connect(my_id)
 def initialize_indices():
     global replica_ids, next_index, match_index
     for id in replica_ids:
-        next_index[id] = len(LOG) # initialize to leader last log index + 1
+        next_index[id] = commit_index + 1 # initialize to leader last log index + 1
         match_index[id] = 0 # initialized to 0, increases monotonically
 
 def send_buffer():
@@ -58,7 +58,7 @@ def send_buffer():
 
 # Handler functions
 def msg_leader(msg):
-    global VALUES, leader_seen, LEADER, STATE, FOLLOWER, TERM, NEW_ENTRIES 
+    global VALUES, leader_seen, LEADER, STATE, FOLLOWER, TERM, NEW_ENTRIES
     res = None
     if msg['type'] == 'get':
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
@@ -71,7 +71,7 @@ def msg_leader(msg):
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID']}
     elif msg['type'] == 'append_entries':
         #print(str(my_id) + ' leader receiving heartbeat')
-        if (TERM < msg['term']): 
+        if (TERM < msg['term']):
             LEADER = msg['src']
             TERM = msg['term']
             leader_seen = time.time()
@@ -80,7 +80,7 @@ def msg_leader(msg):
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             TERM = msg['term'] # they are democratically throwing a coup :(
-            res = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM} 
+            res = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
             STATE = FOLLOWER # and we're going along with it :(
            # print('sending ' + msg['type'])
     if res: sock.send(json.dumps(res))
@@ -89,7 +89,7 @@ def msg_candidate(msg):
     global BUFFER, leader_seen, LEADER, STATE, FOLLOWER, TERM, VOTES, LEADER_STATE
     if msg['type'] in ['get', 'put']:
     # store the message until the election is over
-        BUFFER.append(msg)    
+        BUFFER.append(msg)
     elif msg['type'] == 'append_entries':
         #print(str(my_id) + ' candidate received heartbeat')
         leader_seen = time.time()
@@ -118,10 +118,10 @@ def msg_candidate(msg):
                 send_buffer()
                 VOTES = 0
                 initialize_indices() # configure leader indices
-                 
+
 def msg_follower(msg):
     global leader_seen, LEADER, TERM, BUFFER, VALUES
-    if msg['type'] in ['get', 'put']: 
+    if msg['type'] in ['get', 'put']:
         msg = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'redirect', 'MID': msg['MID']}
         if (LEADER == 'FFFF'):
             BUFFER.append(msg)
@@ -157,14 +157,14 @@ while True:
                 if STATE == LEADER_STATE:
                     msg_leader(msg)
                 elif STATE == CANDIDATE:
-                    msg_candidate(msg)        
+                    msg_candidate(msg)
                 else:
                     msg_follower(msg)
-                    
+
     clock = time.time()
     if STATE == LEADER_STATE and clock-last > .12:
         # Heartbeats
-        heartbeat = False if (len(NEW_ENTRIES) > 0) else True 
+        heartbeat = False if (len(NEW_ENTRIES) > 0) else True
         while len(NEW_ENTRIES) > 0:
             msg = NEW_ENTRIES.pop()
             sock.send(json.dumps(msg))
@@ -182,4 +182,3 @@ while True:
         for id in replica_ids:
             msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM}
             sock.send(json.dumps(msg))
-        
