@@ -65,6 +65,13 @@ def msg_leader(msg):
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
         LOG.append({'term': TERM, 'key': msg['key'], 'value': msg['value']})
+        # send append_entries
+        for id in replica_ids: 
+            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 
+'key': entry['key'], 'value': entry['value'], 'prevLogIndex': (len(LOG) - 1)}
+            sock.send(json.dumps(msg))
+        last = time.time()
+
     elif msg['type'] == 'append_entries':
         #print(str(my_id) + ' leader receiving heartbeat')
         if (TERM < msg['term']):
