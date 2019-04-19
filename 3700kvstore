@@ -52,9 +52,10 @@ def send_buffer():
     global BUFFER
     while (len(BUFFER) > 0):
         msg = BUFFER.pop()
-        msg['leader'] = LEADER
-        msg['dst'] = LEADER
-        sock.send(json.dumps(msg))
+        if STATE == LEADER_STATE:
+            msg_leader(msg)
+        else:
+            msg_follower(msg)
 
 # Handler functions
 def msg_leader(msg):
