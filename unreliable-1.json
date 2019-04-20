@@ -1,5 +1,5 @@
 {
-    "lifetime": 30,
+    "lifetime": 40,
     "replicas": 5,
     "requests": 500,
     "mix" : 0.2,

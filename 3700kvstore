@@ -66,12 +66,13 @@ def msg_leader(msg):
     if msg['type'] == 'get':
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
-        #print('put for ' + msg['key'])
+        print('PUT ' + msg['key'] + ', ' + msg['value'] + ', idx ' + str(len(LOG)))
         LOG.append({'term': TERM, 'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src']})
         # send append_entries
-        for id in replica_ids: 
+        for id in replica_ids:
+            entry = LOG[next_index[id]] 
             msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 
-'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src'], 'commit_index': commit_index,  'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
+'entry': entry, 'client': msg['src'], 'commit_index': commit_index,  'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
             sock.send(json.dumps(msg))
         last = time.time()
 
@@ -82,43 +83,53 @@ def msg_leader(msg):
             TERM = msg['term']
             leader_seen = time.time()
             STATE = FOLLOWER # they threw a coup :(
+            send_buffer()
             # TODO implement commit stage here if msg['key']
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             TERM = msg['term'] # they are democratically throwing a coup :(
             res = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
             STATE = FOLLOWER # and we're going along with it :(
-           # print('sending ' + msg['type'])
+            leader_seen = time.time()
+            LEADER = 'FFFF'
+            print('votes are being requested by ' + str(msg['src']))
     elif msg['type'] == 'ACK':
         # update next_index and match_index
         #print('leader ' + str(my_id) + ' received ACK: ' + str(msg))
         if (msg['success']):
             next_index[msg['src']] = msg['received_index'] + 1 
             match_index[msg['src']] = msg['received_index']
-        else:
-            #print('DECREMENTING INDEX')
-            next_index[msg['src']] = next_index[msg['src']] - 1
-        #print('state of match_index: ' + str(match_index))
-        # see if we have a quorum
-        count = 1
-        new_idx = commit_index
-        #print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index))
-        #print('next_index: ' + str(next_index))
-        for id in replica_ids:
-            if (match_index[id] > commit_index):
-                count = count + 1
-                if (new_idx == commit_index):
-                    new_idx = new_idx + 1 # TODO find the minimum of what's greatr than us
-        if count > (len(replica_ids) + 1) / 2: # TODO check term
-            #print('quorum!!')
-            # good
-            while (commit_index < new_idx):
-                entry = LOG[commit_index + 1]
-                VALUES[entry['key']] = entry['value']
-                commit_index = commit_index + 1
-            #print('sending ok, KEY = ' + str(acked_entry['key']))
-            res = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
+            #print('state of match_index: ' + str(match_index))
+            # see if we have a quorum
+            count = 1
+            new_idx = commit_index
+            print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
+            print('next_index: ' + str(next_index))
+            for id in replica_ids:
+                if (match_index[id] > commit_index):
+                    count = count + 1
+                    if (new_idx == commit_index):
+                        new_idx = new_idx + 1 # TODO find the minimum of what's greatr than us
+            if count > (len(replica_ids) + 1) / 2: # TODO check term
+                #print('quorum!!')
+                # good
+                while (commit_index < new_idx):
+                    entry = LOG[commit_index + 1]
+                    VALUES[entry['key']] = entry['value']
+                    commit_index = commit_index + 1
+                #print('sending ok, KEY = ' + str(acked_entry['key']))
+                res = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
 
+        else: # Failure
+            print(str(my_id) + ' ACK failure received: ' + str(msg) + '. TERM = ' + str(TERM))
+            if (TERM < msg['term']): # We are not the valid leader
+                # Give up the throne
+                print('BAD LEADER failure received. TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']))
+                TERM = msg['term']
+                STATE = FOLLOWER
+            else: # Actual append_entries failure, we are ahead of this follower
+                print('DECREMENTING INDEX')
+                next_index[msg['src']] = next_index[msg['src']] - 1
     if res:
         sock.send(json.dumps(res))
 
@@ -135,7 +146,8 @@ def msg_candidate(msg):
         send_buffer()
         # TODO implement commit stage here if msg['key']
     elif msg['type'] == 'request_vote':
-        if (TERM < msg['term']):
+        last_index = len(LOG) - 1
+        if (TERM < msg['term'] and last_index <= msg['last_log_index'] and LOG[last_index]['term'] == msg['last_log_term']):
             leader_seen = time.time()
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
@@ -149,7 +161,7 @@ def msg_candidate(msg):
             leader_seen = time.time()
             VOTES = VOTES + 1
             if (VOTES > (len(replica_ids) + 1) / 2):
-                #print(str(my_id) + ' is now leader')
+                print(str(my_id) + ' is now leader')
                 STATE = LEADER_STATE
                 LEADER = my_id # declare victory
                 initialize_indices() # configure leader indices
@@ -165,7 +177,8 @@ def msg_follower(msg):
         else:
             sock.send(json.dumps(msg))
     elif msg['type'] == 'request_vote':
-        if (TERM < msg['term']):
+        last_index = len(LOG) - 1
+        if (TERM < msg['term'] and last_index <= msg['last_log_index'] and LOG[last_index]['term'] == msg['last_log_term']):
             leader_seen = time.time()
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
@@ -174,39 +187,51 @@ def msg_follower(msg):
             sock.send(json.dumps(msg))
     elif msg['type'] == 'append_entries':
         leader_seen = time.time()
+        # Commit everything that the leader has committed
         if msg['commit_index'] > commit_index:
             new_idx = min(msg['commit_index'], len(LOG) - 1)
             while (new_idx > commit_index):
                 entry = LOG[commit_index + 1]
                 VALUES[entry['key']] = entry['value']
                 commit_index = commit_index + 1
-        if (TERM < msg['term'] or (TERM == msg['term'] and LEADER != msg['leader'])):
+        if TERM > msg['term']:
+            leader_seen = time.time()
+            print('ACK failure: bad leader: TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']) + ', idx = ' + str(msg['prevLogTerm'] + 1))
+            ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
+            sock.send(json.dumps(ack))
+        elif (TERM < msg['term']):
             LEADER = msg['src']
             TERM = msg['term']
             send_buffer()
-        if (msg['key']):
-            #print('follower received ' + str(msg) + ', TERM = ' + str(TERM) + ' commit_index = ' + str(commit_index))
-            last_entry = len(LOG) - 1
-            # TODO what to do if follower commit index > leader commit index?
-            if msg['term'] == TERM and msg['prevLogIndex'] == last_entry and msg['prevLogTerm'] == LOG[last_entry]['term']:
-                # add to log, send an ACK to the leader
-                entry = {'term': msg['term'], 'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src']}
-                LOG.append(entry)
-                #print('sending ACK, LOG is len ' + str(len(LOG)))
-                ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': True, 'term': TERM, 'commit_index': commit_index, 'received_index': len(LOG) - 1}
-                #print('sending ACK: ' + str(ack))
-                sock.send(json.dumps(ack))
-                #print('sending ACK')
-            elif msg['term'] == TERM and msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] != LOG[msg['prevLogIndex']]['term']:
-                # actually delete stuff because we are ahead of the leader
-                print('todo')
-            elif msg['term'] == TERM and msg['prevLogIndex'] > last_entry:
-                # tell them to slow down
-                print('slow down')
-                ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
-                sock.send(json.dumps(ack))
-            # TODO also see if entry conflicts with prevLogTerm > term
-
+        elif TERM == msg['term']:
+            LEADER = msg['src']
+            if (msg['entry']):
+                #print('follower received ' + str(msg['prevLogIndex']))
+                last_entry = len(LOG) - 1
+                # TODO what to do if follower commit index > leader commit index?
+                if msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] == LOG[msg['prevLogIndex']]['term']:
+                    # add to log, send an ACK to the leader
+                    entry = msg['entry']
+                    if msg['prevLogIndex'] == last_entry:
+                        LOG.append(entry)
+                    else:
+                        LOG[msg['prevLogIndex'] + 1] = entry
+                    ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': True, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
+                    sock.send(json.dumps(ack))
+                elif msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] != LOG[msg['prevLogIndex']]['term']:
+                    # actually delete stuff because we are ahead of the leader, ask them to send earlier things until we have a match
+                    print('corrupted data: prevLogIndex = ' + str(msg['prevLogIndex']) + ', prevLogTerm = ' + str(msg['prevLogTerm']) + '. term found is ' + str(LOG[msg['prevLogIndex']]['term']))
+                    while msg['prevLogIndex'] < last_entry:
+                        del LOG[last_entry]
+                        last_entry = last_entry - 1
+                    ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
+                    sock.send(json.dumps(ack))
+                elif msg['prevLogIndex'] > last_entry:
+                    # tell them to slow down
+                    print(str(my_id) + ' slow down: prevLogIndex = ' + str(msg['prevLogIndex']) + ', last_entry = ' + str(last_entry) + 'src: ' + str(msg['src']))
+                    ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
+                    sock.send(json.dumps(ack))
+                else: print('BAD BAD BAD msg[prevLogTerm] = ' + str(msg['prevLogTerm']) + ', term of item at ' + str(msg['prevLogIndex']) + ' is ' + str(LOG[msg['prevLogIndex']]['term']) + ', last_entry = ' + str(last_entry))
 while True:
     ready = select.select([sock], [], [], 0.02)[0]
 
@@ -229,15 +254,15 @@ while True:
         for id in replica_ids:
             if next_index[id] == len(LOG):
                 # send empty Heartbeat
-                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'key': None, 'value': None}
+                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1], 'entry': None}
                 #print('leader ' + str(my_id) + ' sending heartbeat ')
             else:
                 # send next next_index
                 # TODO blerner would cry abstract this
+                print(str(my_id) + ' sending heartbeat with next entry ' + str(next_index[id]) + ' to ' + str(id))
                 entry = LOG[next_index[id]]
                 #print('entry is ' + str(entry) + ', LOG is ' + str(LOG))
-                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 
-'key': entry['key'], 'value': entry['value'], 'MID': entry['MID'], 'client': entry['client'], 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
+                msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'entry': entry, 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
             sock.send(json.dumps(msg))
 
         last = clock
@@ -246,8 +271,9 @@ while True:
         STATE = CANDIDATE
         TERM = TERM + 1
         VOTES = 1
-        #print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
+        print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
         leader_seen = time.time()
+        last_index = len(LOG) - 1
         for id in replica_ids:
-            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM}
+            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM, 'last_log_index': last_index, 'last_log_term': LOG[last_index]['term']}
             sock.send(json.dumps(msg))
