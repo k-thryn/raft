@@ -80,6 +80,7 @@ def msg_leader(msg):
     res = None
     #print('leader LOG is ' + str(LOG))
     if msg['type'] == 'get':
+        print('GET ' + str(msg))
         res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
         print('PUT ' + msg['key'] + ', ' + msg['value'] + ', idx ' + str(len(LOG)))
@@ -130,6 +131,7 @@ def msg_leader(msg):
                     entry = LOG[commit_index + 1]
                     VALUES[entry['key']] = entry['value']
                     commit_index = commit_index + 1
+                    print('leader committing idx ' + str(commit_index))
                     ok = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
                     sock.send(json.dumps(ok))
                 #VALUES[LOG[commit_index]['key']] = LOG[commit_index]['value']
@@ -193,7 +195,7 @@ def msg_follower(msg):
                 entry = LOG[commit_index + 1]
                 VALUES[entry['key']] = entry['value']
                 commit_index = commit_index + 1
-            #VALUES[LOG[commit_index]['key']] = LOG[commit_index]['value']
+                print('follower committing idx ' + str(commit_index))
         if TERM > msg['term']:
             leader_seen = time.time()
             #print('ACK failure: bad leader: TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']) + ', idx = ' + str(msg['prevLogTerm'] + 1))
