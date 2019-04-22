@@ -65,7 +65,6 @@ def handle_vote(msg):
         # look at the last item in each log
         #print('term of last item in log: ' + str(LOG[last_index]['term']) + ', msg[last_log_term] = ' + str(msg['last_log_term']))
         if (LOG[last_index]['term'] < msg['last_log_term']) or (LOG[last_index]['term'] == msg['last_log_term'] and last_index <= msg['last_log_index']):
-            leader_seen = time.time()
             LEADER = 'FFFF'
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
@@ -83,10 +82,12 @@ def msg_leader(msg):
         # see if we have any uncommitted changes for that key
         ready = True
         print('GET KEY ' + msg['key'])
+
         for entry in LOG[commit_index + 1:]:
-            if entry['key'] == msg['key']:
+            if entry['term'] != TERM and entry['key'] == msg['key']:
                 ready = False
                 print('KNOWN BUG')
+
         if ready: res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
         print('PUT ' + msg['key'] + ', ' + msg['value'])
@@ -175,7 +176,6 @@ def msg_candidate(msg):
     elif msg['type'] == 'vote':
         #print(str(my_id) + ' received a vote in term ' + str(msg['term']) + ', ' + str(TERM) + ' from ' + str(msg['src']))
         if (TERM == msg['term']):
-            leader_seen = time.time()
             VOTES = VOTES + 1
             if (VOTES > (len(replica_ids) + 1) / 2):
                 print(str(my_id) + ' is now leader')
@@ -206,7 +206,6 @@ def msg_follower(msg):
                 commit_index = commit_index + 1
                 #print('follower committing idx ' + str(commit_index) + ' with keys ' + entry['key'] + '  with id ' + my_id)
         if TERM > msg['term']:
-            leader_seen = time.time()
             ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
             sock.send(json.dumps(ack))
         elif (TERM < msg['term']):
@@ -286,7 +285,7 @@ while True:
         STATE = CANDIDATE
         TERM = TERM + 1
         VOTES = 1
-        #print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
+        ELECTION_TIMEOUT = random.uniform(.15, 3)
         leader_seen = time.time()
         last_index = len(LOG) - 1
         for id in replica_ids:
