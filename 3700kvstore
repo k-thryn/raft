@@ -17,6 +17,7 @@ VOTED_FOR = None
 BUFFER = []
 LOG = [{'term': 0}]
 NEW_ENTRIES = []
+RESPONSE_BUFFER = []
 
 # Your ID number
 my_id = sys.argv[1]
@@ -53,44 +54,75 @@ def send_buffer():
     global BUFFER
     while (len(BUFFER) > 0):
         msg = BUFFER.pop()
+        msg['leader'] = LEADER
         if STATE == LEADER_STATE:
             msg_leader(msg)
         else:
             msg_follower(msg)
 
+def begin_candidacy():
+    global STATE, CANDIDATE, TERM, VOTES, ELECTION_TIMEOUT, leader_seen 
+    STATE = CANDIDATE
+    TERM = TERM + 1
+    VOTES = 1
+    ELECTION_TIMEOUT = random.uniform(.15, 3)
+    leader_seen = time.time()
+    last_index = len(LOG) - 1
+    for id in replica_ids:
+        msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM, 'last_log_index': last_index, 'last_log_term': LOG[last_index]['term']}
+        sock.send(json.dumps(msg))
+
+def send_response_buffer():
+    global RESPONSE_BUFFER
+    while len(RESPONSE_BUFFER) > 0:
+        sock.send(json.dumps(RESPONSE_BUFFER.pop()))
+        
+
 def handle_vote(msg):
-    global LOG, TERM, leader_seen, LEADER, VOTED_FOR
+    global LOG, TERM, leader_seen, LEADER, VOTED_FOR, CANDIDATE
     last_index = len(LOG) - 1
     if (TERM < msg['term']):
+        print(str(my_id) + ' considering voting for ' + str(msg['src']))
         # look at the last item in each log
-        #print('term of last item in log: ' + str(LOG[last_index]['term']) + ', msg[last_log_term] = ' + str(msg['last_log_term']))
-        if (LOG[last_index]['term'] < msg['last_log_term']) or (LOG[last_index]['term'] == msg['last_log_term'] and last_index <= msg['last_log_index']):
+        print('term of last item in log: ' + str(LOG[last_index]['term']) + ', msg[last_log_term] = ' + str(msg['last_log_term']))
+        print('my last_index: ' + str(last_index) + ', candidate last index: ' + str(msg['last_log_index']))
+        if (LOG[last_index]['term'] == msg['last_log_term'] and last_index <= msg['last_log_index']) or (LOG[last_index]['term'] < msg['last_log_term']):
+            print(str(my_id) + ' voting in term ' + str(TERM) + ' for ' + str(msg['src']))
+            VOTED_FOR = msg['src']
             LEADER = 'FFFF'
+            leader_seen = time.time()
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
-            print(str(my_id) + ' voting in term ' + str(TERM))
-            VOTED_FOR = msg['src']
             sock.send(json.dumps(msg))
+        #elif (last_index > msg['last_log_index']):
+            # Run for leader
+            #begin_candidacy()
+             
 
 
 # Handler functions
 def msg_leader(msg):
-    global VALUES, leader_seen, LOG, LEADER, STATE, FOLLOWER, TERM, NEW_ENTRIES, next_index, match_index, commit_index
+    global VALUES, leader_seen, LOG, requests, responses, LEADER, STATE, FOLLOWER, TERM, NEW_ENTRIES, next_index, match_index, RESPONSE_BUFFER, commit_index
     res = None
     #print('leader LOG is ' + str(LOG))
     if msg['type'] == 'get':
         # see if we have any uncommitted changes for that key
         ready = True
-        print('GET KEY ' + msg['key'])
+        requests.write(msg['MID'] + '\n')
 
         for entry in LOG[commit_index + 1:]:
             if entry['term'] != TERM and entry['key'] == msg['key']:
                 ready = False
-                print('KNOWN BUG')
+                delayed = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': entry['value']}
+                RESPONSE_BUFFER.append(delayed)
 
-        if ready: res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
+        if ready: 
+            res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
+            responses.write(res['MID'] + '\n')
+
     elif msg['type'] == 'put':
-        print('PUT ' + msg['key'] + ', ' + msg['value'])
+        requests.write(msg['MID'] + '\n')
+        print('PUT MID ' + msg['MID'] + ': ' + msg['key'] + ', ' + msg['value'] + ': ' + msg['MID'] + ', idx = ' + str(len(LOG)))
         #print('PUT ' + msg['key'] + ', ' + msg['value'] + ', idx ' + str(len(LOG)))
         LOG.append({'term': TERM, 'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src']})
         # send append_entries
@@ -110,25 +142,27 @@ def msg_leader(msg):
             TERM = msg['term']
             leader_seen = time.time()
             STATE = FOLLOWER # they threw a coup :(
+            RESPONSE_BUFFER = []
             send_buffer()
             # TODO implement commit stage here if msg['key']
     elif msg['type'] == 'request_vote':
         if (TERM < msg['term']):
             handle_vote(msg)
             STATE = FOLLOWER # and we're going along with it :(
-            #print('votes are being requested by ' + str(msg['src']))
+            RESPONSE_BUFFER = []
     elif msg['type'] == 'ACK':
         # update next_index and match_index
         #print('leader ' + str(my_id) + ' received ACK: ' + str(msg))
         if (msg['success']):
-            next_index[msg['src']] = msg['received_index'] + 1
+            received = min(msg['received_index'], len(LOG) - 1)
+            next_index[msg['src']] = received + 1
             match_index[msg['src']] = msg['received_index']
             #print('state of match_index: ' + str(match_index))
             # see if we have a quorum
             count = 1
             new_idx = msg['received_index']
-            #print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
-            #print('next_index: ' + str(next_index))
+            print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
+            print('next_index: ' + str(next_index))
             for id in replica_ids:
                 #print('match index for ' + str(id) + ' is ' + str(match_index[id]) + ', len(LOG) = ' + str(len(LOG)))
                 if (match_index[id] > commit_index and LOG[match_index[id]]['term'] == TERM):
@@ -137,6 +171,7 @@ def msg_leader(msg):
             if count > (len(replica_ids) + 1) / 2:
                 print('quorum!!')
                 # good
+                send_response_buffer()
                 while (commit_index < new_idx):
                     entry = LOG[commit_index + 1]
                     VALUES[entry['key']] = entry['value']
@@ -144,7 +179,9 @@ def msg_leader(msg):
                     #print('leader committing idx ' + str(commit_index) + 'with key' + VALUES[entry['key']])
                     if TERM == entry['term']:
                         ok = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
-                        print('OK ' + entry['MID'] + '(key ' + entry['key'] + ')')
+                        responses.write(entry['MID'] + '\n')
+
+                        print('OK ' + entry['MID'])
                         sock.send(json.dumps(ok))
         else: # Failure
             #print(str(my_id) + ' ACK failure received: ' + str(msg) + '. TERM = ' + str(TERM))
@@ -164,11 +201,12 @@ def msg_candidate(msg):
     if msg['type'] in ['get', 'put']:
     # store the message until the election is over
         BUFFER.append(msg)
-    elif msg['type'] == 'append_entries':
+    elif msg['type'] == 'append_entries' and TERM < msg['term']:
         #print(str(my_id) + ' candidate received heartbeat')
         leader_seen = time.time()
         LEADER = msg['src']
         STATE = FOLLOWER
+        RESPONSE_BUFFER = []
         send_buffer()
         # TODO implement commit stage here if msg['key']
     elif msg['type'] == 'request_vote':
@@ -177,6 +215,7 @@ def msg_candidate(msg):
         #print(str(my_id) + ' received a vote in term ' + str(msg['term']) + ', ' + str(TERM) + ' from ' + str(msg['src']))
         if (TERM == msg['term']):
             VOTES = VOTES + 1
+            print(str(my_id) + ' received vote from ' + str(msg['src']))
             if (VOTES > (len(replica_ids) + 1) / 2):
                 print(str(my_id) + ' is now leader')
                 STATE = LEADER_STATE
@@ -248,6 +287,8 @@ def msg_follower(msg):
                 else: print('BAD BAD BAD msg[prevLogTerm] = ' + str(msg['prevLogTerm']) + ', term of item at ' + str(msg['prevLogIndex']) + ' is ' + str(LOG[msg['prevLogIndex']]['term']) + ', last_entry = ' + str(last_entry))
 while True:
     ready = select.select([sock], [], [], 0.02)[0]
+    requests = open("requests.txt", "a+")
+    responses = open("responses.txt", "a+")
 
     if sock in ready:
         msg_raw = sock.recv(32768)
@@ -285,12 +326,8 @@ while True:
         last = clock
 
     elif (STATE != LEADER_STATE) and (clock-leader_seen > ELECTION_TIMEOUT):
-        STATE = CANDIDATE
-        TERM = TERM + 1
-        VOTES = 1
-        ELECTION_TIMEOUT = random.uniform(.15, 3)
-        leader_seen = time.time()
-        last_index = len(LOG) - 1
-        for id in replica_ids:
-            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'type': 'request_vote', 'term': TERM, 'last_log_index': last_index, 'last_log_term': LOG[last_index]['term']}
-            sock.send(json.dumps(msg))
+        begin_candidacy()
+       
+    requests.close()
+    responses.close()
+
