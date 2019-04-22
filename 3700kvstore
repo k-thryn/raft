@@ -68,6 +68,7 @@ def handle_vote(msg):
             LEADER = 'FFFF'
             TERM = msg['term']
             msg = {'src': my_id, 'dst': msg['src'], 'leader': 'FFFF', 'type': 'vote', 'term': TERM}
+            leader_seen = time.time()
             print(str(my_id) + ' voting in term ' + str(TERM))
             VOTED_FOR = msg['src']
             sock.send(json.dumps(msg))
@@ -131,6 +132,8 @@ def msg_leader(msg):
             #print('next_index: ' + str(next_index))
             for id in replica_ids:
                 #print('match index for ' + str(id) + ' is ' + str(match_index[id]) + ', len(LOG) = ' + str(len(LOG)))
+                if (match_index[id] > len(LOG)):
+                    print("SHOULD NEVER HAPPEN\n\n")
                 if (match_index[id] > commit_index and LOG[match_index[id]]['term'] == TERM):
                     count = count + 1
                     new_idx = min(new_idx, match_index[id])
