@@ -197,14 +197,7 @@ def msg_follower(msg):
         handle_vote(msg)
     elif msg['type'] == 'append_entries':
         leader_seen = time.time()
-        # Commit everything that the leader has committed
-        if msg['commit_index'] > commit_index:
-            new_idx = min(msg['commit_index'], len(LOG) - 1)
-            while (new_idx > commit_index):
-                entry = LOG[commit_index + 1]
-                VALUES[entry['key']] = entry['value']
-                commit_index = commit_index + 1
-                #print('follower committing idx ' + str(commit_index) + ' with keys ' + entry['key'] + '  with id ' + my_id)
+
         if TERM > msg['term']:
             ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': False, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + 1}
             sock.send(json.dumps(ack))
@@ -214,6 +207,16 @@ def msg_follower(msg):
             send_buffer()
         else:
             LEADER = msg['src']
+            # Commit everything that the leader has committed
+            if msg['commit_index'] > commit_index:
+                new_idx = min(msg['commit_index'], len(LOG) - 1)
+                while (new_idx > commit_index):
+                    entry = LOG[commit_index + 1]
+                    VALUES[entry['key']] = entry['value']
+                    commit_index = commit_index + 1
+                    #print('follower committing idx ' + str(commit_index) + ' with keys ' + entry['key'] + '  with id ' + my_id)
+
+
             if (msg['entries']):
                 #print('append entries received: ' + str(msg['entries']))
                 #print('follower received ' + str(msg['prevLogIndex']))
