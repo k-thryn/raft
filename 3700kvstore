@@ -64,7 +64,7 @@ def handle_vote(msg):
     if (TERM < msg['term']):
         # look at the last item in each log
         #print('term of last item in log: ' + str(LOG[last_index]['term']) + ', msg[last_log_term] = ' + str(msg['last_log_term']))
-        if (LOG[last_index]['term'] < msg['last_log_term']) or (LOG[last_index]['term'] == msg['last_log_term'] and last_index <= msg['last_log_index']):     
+        if (LOG[last_index]['term'] < msg['last_log_term']) or (LOG[last_index]['term'] == msg['last_log_term'] and last_index <= msg['last_log_index']):
             leader_seen = time.time()
             LEADER = 'FFFF'
             TERM = msg['term']
@@ -81,15 +81,23 @@ def msg_leader(msg):
     #print('leader LOG is ' + str(LOG))
     if msg['type'] == 'get':
         print('GET ' + str(msg))
-        res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
+        #print('LEADER LOG id: ' + str(my_id))
+        #for i in range(1, len(LOG)):
+        #    print('ind: ' + str(i) + ' KEY: ' + LOG[i]['key'] + 'VALUE: ' + LOG[i]['value'])
+        #res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
         print('PUT ' + msg['key'] + ', ' + msg['value'] + ', idx ' + str(len(LOG)))
+        #print('LEADER LOG id: ' + str(my_id))
+        #for i in range(1, len(LOG)):
+        #    print('ind: ' + str(i) + ' KEY: ' + LOG[i]['key'] + 'VALUE: ' + LOG[i]['value'])
+
         LOG.append({'term': TERM, 'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src']})
         # send append_entries
         for id in replica_ids:
             end = min(len(LOG) - next_index[id] - 1, 10) + next_index[id]
-            print('length of entries is ' + str(len(LOG[next_index[id]:end]))) 
-            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 
+            #if id == '0001': print('next_index is ' + str(next_index[id]) + ', sending from ' + str(LOG[next_index[id]]['key']))
+            #print('length of entries is ' + str(len(LOG[next_index[id]:end])))
+            msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries',
 'entries': LOG[next_index[id]:end], 'client': msg['src'], 'commit_index': commit_index,  'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
             sock.send(json.dumps(msg))
         last = time.time()
@@ -112,7 +120,7 @@ def msg_leader(msg):
         # update next_index and match_index
         #print('leader ' + str(my_id) + ' received ACK: ' + str(msg))
         if (msg['success']):
-            next_index[msg['src']] = msg['received_index'] + 1 
+            next_index[msg['src']] = msg['received_index'] + 1
             match_index[msg['src']] = msg['received_index']
             #print('state of match_index: ' + str(match_index))
             # see if we have a quorum
@@ -131,16 +139,17 @@ def msg_leader(msg):
                     entry = LOG[commit_index + 1]
                     VALUES[entry['key']] = entry['value']
                     commit_index = commit_index + 1
-                    print('leader committing idx ' + str(commit_index))
-                    ok = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
-                    sock.send(json.dumps(ok))
+                    #print('leader committing idx ' + str(commit_index) + 'with key' + VALUES[entry['key']])
+                    if TERM == entry['term']:
+                        ok = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
+                        sock.send(json.dumps(ok))
                 #VALUES[LOG[commit_index]['key']] = LOG[commit_index]['value']
-                #print('sending ok, KEY = ' + str(acked_entry['key'])) 
+                #print('sending ok, KEY = ' + str(acked_entry['key']))
         else: # Failure
             #print(str(my_id) + ' ACK failure received: ' + str(msg) + '. TERM = ' + str(TERM))
             if (TERM < msg['term']): # We are not the valid leader
                 # Give up the throne
-                print('BAD LEADER failure received. TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']))
+                #print('BAD LEADER failure received. TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']))
                 TERM = msg['term']
                 STATE = FOLLOWER
             else: # Actual append_entries failure, we are ahead of this follower
@@ -164,7 +173,7 @@ def msg_candidate(msg):
     elif msg['type'] == 'request_vote':
         handle_vote(msg)
     elif msg['type'] == 'vote':
-        print(str(my_id) + ' received a vote in term ' + str(msg['term']) + ', ' + str(TERM) + ' from ' + str(msg['src']))
+        #print(str(my_id) + ' received a vote in term ' + str(msg['term']) + ', ' + str(TERM) + ' from ' + str(msg['src']))
         if (TERM == msg['term']):
             leader_seen = time.time()
             VOTES = VOTES + 1
@@ -175,7 +184,7 @@ def msg_candidate(msg):
                 initialize_indices() # configure leader indices
                 send_buffer()
                 VOTES = 0
-     
+
 def msg_follower(msg):
     global leader_seen, LEADER, TERM, BUFFER, VALUES, commit_index
     if msg['type'] in ['get', 'put']:
@@ -185,7 +194,7 @@ def msg_follower(msg):
         else:
             sock.send(json.dumps(msg))
     elif msg['type'] == 'request_vote':
-        handle_vote(msg)       
+        handle_vote(msg)
     elif msg['type'] == 'append_entries':
         leader_seen = time.time()
         # Commit everything that the leader has committed
@@ -195,7 +204,7 @@ def msg_follower(msg):
                 entry = LOG[commit_index + 1]
                 VALUES[entry['key']] = entry['value']
                 commit_index = commit_index + 1
-                print('follower committing idx ' + str(commit_index))
+                #print('follower committing idx ' + str(commit_index) + ' with keys ' + entry['key'] + '  with id ' + my_id)
         if TERM > msg['term']:
             leader_seen = time.time()
             #print('ACK failure: bad leader: TERM = ' + str(TERM) + ', msg[term] = ' + str(msg['term']) + ', idx = ' + str(msg['prevLogTerm'] + 1))
@@ -214,10 +223,18 @@ def msg_follower(msg):
                 if msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] == LOG[msg['prevLogIndex']]['term']:
                     # add to log, send an ACK to the leader
                     entries = msg['entries']
-                    if msg['prevLogIndex'] == last_entry:
-                        LOG.extend(entries)
-                    else:
-                        LOG[msg['prevLogIndex'] + 1:msg['prevLogIndex'] + 1] = entries
+                    start = msg['prevLogIndex'] + 1
+                    #if my_id == '0001': print('FOLLOWER LOG prevlogindex', msg['prevLogIndex'])
+                    #for i in range(1, len(LOG)):
+                    #    if my_id == '0001': print('ind: ' + str(i) + ' KEY: ' + LOG[i]['key'] + 'VALUE: ' + LOG[i]['value'])
+
+                    while (start <= last_entry and len(entries) > 0):
+                        #if my_id == '0001': print('DOING THE WEIRD THING: log[start] is' + str(LOG[start]['key'] + 'start = ' + str(start)))
+                        #if my_id == '0001': print('last_entry = ' + str(last_entry))
+                        LOG[start] = entries.pop(0)
+                        #if my_id == '0001': print('LOG[start] is now ' + str(LOG[start]['key']))
+                        start = start + 1
+                    LOG.extend(entries)
                     ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': True, 'term': TERM, 'commit_index': commit_index, 'received_index': msg['prevLogIndex'] + len(msg['entries'])}
                     sock.send(json.dumps(ack))
                 elif msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] != LOG[msg['prevLogIndex']]['term']:
@@ -264,7 +281,7 @@ while True:
                 # TODO blerner would cry abstract this
                 #print(str(my_id) + ' sending heartbeat with next entry ' + str(next_index[id]) + ' to ' + str(id))
                 entries = LOG[next_index[id]:end]
-                print('length of entries is ' + str(len(entries)))
+                #print('length of entries is ' + str(len(entries)))
                 #print('entry is ' + str(entry) + ', LOG is ' + str(LOG))
                 msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'entries': entries, 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1]['term']}
             sock.send(json.dumps(msg))
@@ -275,7 +292,7 @@ while True:
         STATE = CANDIDATE
         TERM = TERM + 1
         VOTES = 1
-        print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
+        #print(str(my_id) + ' request_vote: clock = ' + str(clock) + ' diff = ' + str(clock-leader_seen))
         leader_seen = time.time()
         last_index = len(LOG) - 1
         for id in replica_ids:
