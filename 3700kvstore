@@ -80,10 +80,16 @@ def msg_leader(msg):
     res = None
     #print('leader LOG is ' + str(LOG))
     if msg['type'] == 'get':
-        #print('GET ' + str(msg))
-        res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
+        # see if we have any uncommitted changes for that key
+        ready = True
+        print('GET KEY ' + msg['key'])
+        for entry in LOG[commit_index + 1:]:
+            if entry['key'] == msg['key']:
+                ready = False
+                print('KNOWN BUG')
+        if ready: res = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ok', 'MID': msg['MID'], 'value': VALUES[msg['key']]}
     elif msg['type'] == 'put':
-        print('PUT MID ' + msg['MID'])
+        print('PUT ' + msg['key'] + ', ' + msg['value'])
         #print('PUT ' + msg['key'] + ', ' + msg['value'] + ', idx ' + str(len(LOG)))
         LOG.append({'term': TERM, 'key': msg['key'], 'value': msg['value'], 'MID': msg['MID'], 'client': msg['src']})
         # send append_entries
@@ -114,8 +120,8 @@ def msg_leader(msg):
         # update next_index and match_index
         #print('leader ' + str(my_id) + ' received ACK: ' + str(msg))
         if (msg['success']):
-            next_index[msg['src']] = msg['received_index'] + 1
-            match_index[msg['src']] = msg['received_index']
+            next_index[msg['src']] = min(len(LOG), msg['received_index'] + 1)
+            match_index[msg['src']] = min(len(LOG) - 1, msg['received_index'])
             #print('state of match_index: ' + str(match_index))
             # see if we have a quorum
             count = 1
@@ -123,6 +129,7 @@ def msg_leader(msg):
             #print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
             #print('next_index: ' + str(next_index))
             for id in replica_ids:
+                #print('match index for ' + str(id) + ' is ' + str(match_index[id]) + ', len(LOG) = ' + str(len(LOG)))
                 if (match_index[id] > commit_index and LOG[match_index[id]]['term'] == TERM):
                     count = count + 1
                     new_idx = min(new_idx, match_index[id])
@@ -136,7 +143,7 @@ def msg_leader(msg):
                     #print('leader committing idx ' + str(commit_index) + 'with key' + VALUES[entry['key']])
                     if TERM == entry['term']:
                         ok = {'src': my_id, 'dst': LOG[commit_index]['client'], 'leader': LEADER, 'type': 'ok', 'MID': LOG[commit_index]['MID']}
-                        print('OK ' + entry['MID'])
+                        print('OK ' + entry['MID'] + '(key ' + entry['key'] + ')')
                         sock.send(json.dumps(ok))
         else: # Failure
             #print(str(my_id) + ' ACK failure received: ' + str(msg) + '. TERM = ' + str(TERM))
