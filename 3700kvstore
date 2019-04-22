@@ -120,8 +120,8 @@ def msg_leader(msg):
         # update next_index and match_index
         #print('leader ' + str(my_id) + ' received ACK: ' + str(msg))
         if (msg['success']):
-            next_index[msg['src']] = min(len(LOG), msg['received_index'] + 1)
-            match_index[msg['src']] = min(len(LOG) - 1, msg['received_index'])
+            next_index[msg['src']] = msg['received_index'] + 1
+            match_index[msg['src']] = msg['received_index']
             #print('state of match_index: ' + str(match_index))
             # see if we have a quorum
             count = 1
