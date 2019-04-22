@@ -120,7 +120,7 @@ def msg_leader(msg):
             # see if we have a quorum
             count = 1
             new_idx = msg['received_index']
-            print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
+            #print('match_index: ' + str(match_index) + ', leader commit_index: ' + str(commit_index) + ' term: ' + str(TERM))
             #print('next_index: ' + str(next_index))
             for id in replica_ids:
                 if (match_index[id] > commit_index and LOG[match_index[id]]['term'] == TERM):
@@ -147,7 +147,7 @@ def msg_leader(msg):
                 STATE = FOLLOWER
             else: # Actual append_entries failure, we are ahead of this follower
                 print('DECREMENTING INDEX')
-                next_index[msg['src']] = next_index[msg['src']] - 1
+                next_index[msg['src']] = min(next_index[msg['src']] - 1, 1)
     if res:
         sock.send(json.dumps(res))
 
@@ -209,6 +209,7 @@ def msg_follower(msg):
         else:
             LEADER = msg['src']
             if (msg['entries']):
+                #print('append entries received: ' + str(msg['entries']))
                 #print('follower received ' + str(msg['prevLogIndex']))
                 last_entry = len(LOG) - 1
                 if msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] == LOG[msg['prevLogIndex']]['term']:
@@ -254,9 +255,9 @@ while True:
 
     clock = time.time()
     if STATE == LEADER_STATE and clock-last > .12:
-        end = min(len(LOG) - next_index[id] - 1, 10) + next_index[id]
         # Heartbeats
         for id in replica_ids:
+            end = min(len(LOG) - next_index[id], 10) + next_index[id]
             if next_index[id] == len(LOG):
                 # send empty Heartbeat
                 msg = {'src': my_id, 'dst': id, 'leader': LEADER, 'term': TERM, 'type': 'append_entries', 'commit_index': commit_index, 'prevLogIndex': (next_index[id] - 1), 'prevLogTerm': LOG[next_index[id] - 1], 'entries': None}
@@ -264,7 +265,8 @@ while True:
             else:
                 # send next next_index
                 # TODO blerner would cry abstract this
-                #print(str(my_id) + ' sending heartbeat with next entry ' + str(next_index[id]) + ' to ' + str(id))
+                #print('next_index[id] = ' + str(next_index[id]) + ', len(LOG) = ' + str(len(LOG)))
+                #print(str(my_id) + ' sending heartbeat with entries ' + str(LOG[next_index[id]:end]))
                 entries = LOG[next_index[id]:end]
                 #print('length of entries is ' + str(len(entries)))
                 #print('entry is ' + str(entry) + ', LOG is ' + str(LOG))
