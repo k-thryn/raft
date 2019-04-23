@@ -231,12 +231,11 @@ def msg_follower(msg):
                     # add to log, send an ACK to the leader
                     entries = msg['entries']
                     start = msg['prevLogIndex'] + 1
-                    received = start + len(entries)
                     while (start <= last_entry and len(entries) > 0):
                         LOG[start] = entries.pop(0)
                         start = start + 1
                     LOG.extend(entries)
-                    ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': True, 'term': TERM, 'commit_index': commit_index, 'received_index': max(received, len(LOG) - 1)}
+                    ack = {'src': my_id, 'dst': msg['src'], 'leader': LEADER, 'type': 'ACK', 'success': True, 'term': TERM, 'commit_index': commit_index, 'received_index': len(LOG) - 1}
                     sock.send(json.dumps(ack))
                 elif msg['prevLogIndex'] <= last_entry and msg['prevLogTerm'] != LOG[msg['prevLogIndex']]['term']:
                     # actually delete stuff because we are ahead of the leader, ask them to send earlier things until we have a match
