@@ -13,4 +13,4 @@
 **Testing Method**
 - We tried to test on a gradient from simple to hard tests. 
 - When things started working on harder tests, we'd go back to simpler ones for regression testing. The simple ones would then often start failing. 
-*What we learned*: Progress is not linear (see: building character). If we had to plot our progress for this project on a graph, it would likely resemble an unfinished Etch-A-Sketch. We went from passing 8 tests to 17 after changing one line of code. We would like to thank the Academy, and caffeine.
+- *What we learned*: Progress is not linear (see: building character). If we had to plot our progress for this project on a graph, it would likely resemble an unfinished Etch-A-Sketch. We went from passing 8 tests to 17 after changing one line of code. We would like to thank the Academy, and caffeine.
